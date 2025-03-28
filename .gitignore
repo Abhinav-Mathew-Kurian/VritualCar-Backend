@@ -1,0 +1,40 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Logs
+logs/
+*.log
+logs.txt
+debug.log
+error.log
+pm2.log
+pm2.pid
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Database files
+*.sqlite
+*.sqlite3
+dump.rdb
+mongod.lock
+data/
+
+# Compiled files
+dist/
+build/
+coverage/
+
+# System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
