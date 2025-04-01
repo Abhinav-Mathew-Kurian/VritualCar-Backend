@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const WebSocket = require("ws");
 const cors = require("cors");
 const PING_INTERVAL = 30000;
-
+const MAX_TEMP = 55;
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -73,7 +73,15 @@ const startSimulation = async () => {
       currentSoC = Math.max(currentSoC, 20);
 
       // Temperature variation
-      currentTemp = Number((currentTemp + (Math.random() * 0.2 - 0.1)).toFixed(1));
+      const temperatureChange = (Math.random() * 0.2 - 0.1); // This gives a random value between -0.1 and +0.1
+      currentTemp = Number((currentTemp + temperatureChange).toFixed(1));
+  
+      // Ensure temperature doesn't exceed MAX_TEMP or fall below a certain value
+      if (currentTemp > MAX_TEMP) {
+        currentTemp = MAX_TEMP; // Cap the temperature at MAX_TEMP
+      } else if (currentTemp < 10) {
+        currentTemp = 10; // Ensure the temperature doesn't go below 10°C (you can adjust this lower limit as needed)
+      }
 
       // Update the document
       const updatedCar = await Car.findByIdAndUpdate(
