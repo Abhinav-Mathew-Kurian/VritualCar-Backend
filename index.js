@@ -3,6 +3,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const WebSocket = require("ws");
 const cors = require("cors");
+const PING_INTERVAL = 30000;
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -71,7 +73,7 @@ const startSimulation = async () => {
       currentSoC = Math.max(currentSoC, 20);
 
       // Temperature variation
-      currentTemp = Number((currentTemp + (Math.random() * 0.7 - 0.1)).toFixed(1));
+      currentTemp = Number((currentTemp + (Math.random() * 0.2 - 0.1)).toFixed(1));
 
       // Update the document
       const updatedCar = await Car.findByIdAndUpdate(
@@ -126,9 +128,25 @@ app.get("/start-simulation", async (req, res) => {
 
 // WebSocket connection handling
 wss.on("connection", async (ws) => {
-  console.log("📡 WebSocket Client Connected");
-
-  // Send initial car data immediately upon connection
+    console.log("📡 WebSocket Client Connected");
+    
+    // Set up ping interval
+    ws.isAlive = true;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+    
+    const pingInterval = setInterval(() => {
+      if (ws.isAlive === false) {
+        console.log("❌ Terminating dead connection");
+        return ws.terminate();
+      }
+      
+      ws.isAlive = false;
+      ws.ping();
+    }, PING_INTERVAL);
+    
+    
   try {
     const initialCar = await Car.findOne();
     if (initialCar) {
@@ -137,6 +155,11 @@ wss.on("connection", async (ws) => {
     } else {
       console.log("⚠️ No car data found to send");
     }
+    const heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
+        }
+      }, 30000);
   } catch (error) {
     console.error("❌ Error sending initial car data:", error);
   }
@@ -145,8 +168,9 @@ wss.on("connection", async (ws) => {
   ws.on("message", (message) => {
     console.log("📩 Received message:", message);
   });
-
-  ws.on("close", () => {
+// Clear interval on close
+ws.on('close', () => {
+    clearInterval(pingInterval);
     console.log("❌ WebSocket Client Disconnected");
   });
 });
