@@ -7,7 +7,7 @@ const PING_INTERVAL = 30000;
 const MAX_TEMP = 55;
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4100;
 
 app.use(express.json());
 app.use(cors());
@@ -76,9 +76,9 @@ const startSimulation = async () => {
       const temperatureChange = (Math.random() * 0.2 - 0.1); // This gives a random value between -0.1 and +0.1
       currentTemp = Number((currentTemp + temperatureChange).toFixed(1));
   
-      // Ensure temperature doesn't exceed MAX_TEMP or fall below a certain value
+    
       if (currentTemp > MAX_TEMP) {
-        currentTemp = MAX_TEMP; // Cap the temperature at MAX_TEMP
+        currentTemp = MAX_TEMP; 
       } else if (currentTemp < 10) {
         currentTemp = 10; // Ensure the temperature doesn't go below 10°C (you can adjust this lower limit as needed)
       }
@@ -126,7 +126,7 @@ app.get("/start-simulation", async (req, res) => {
   await Car.findOneAndUpdate(
     {}, 
     { 
-      stateOfCharge: 100,  // Reset to initial state explicitly
+      stateOfCharge: 70,  // Reset to initial state explicitly
       batteryTemperature: 15.6 
     }
   );
@@ -136,25 +136,24 @@ app.get("/start-simulation", async (req, res) => {
 
 // WebSocket connection handling
 wss.on("connection", async (ws) => {
-    console.log("📡 WebSocket Client Connected");
-    
-    // Set up ping interval
+  console.log("📡 WebSocket Client Connected");
+  
+  // Set up ping interval
+  ws.isAlive = true;
+  ws.on('pong', () => {
     ws.isAlive = true;
-    ws.on('pong', () => {
-      ws.isAlive = true;
-    });
+  });
+  
+  const pingInterval = setInterval(() => {
+    if (ws.isAlive === false) {
+      console.log("❌ Terminating dead connection");
+      return ws.terminate();
+    }
     
-    const pingInterval = setInterval(() => {
-      if (ws.isAlive === false) {
-        console.log("❌ Terminating dead connection");
-        return ws.terminate();
-      }
-      
-      ws.isAlive = false;
-      ws.ping();
-    }, PING_INTERVAL);
-    
-    
+    ws.isAlive = false;
+    ws.ping();
+  }, PING_INTERVAL);
+  
   try {
     const initialCar = await Car.findOne();
     if (initialCar) {
@@ -163,22 +162,83 @@ wss.on("connection", async (ws) => {
     } else {
       console.log("⚠️ No car data found to send");
     }
+    
     const heartbeatInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
-        }
-      }, 30000);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
+      }
+    }, 30000);
+    
+    // Clean up intervals when connection closes
+    ws.on('close', () => {
+      clearInterval(pingInterval);
+      clearInterval(heartbeatInterval);
+      console.log("❌ WebSocket Client Disconnected");
+    });
   } catch (error) {
     console.error("❌ Error sending initial car data:", error);
   }
 
-  // Optional: Handle any incoming messages
-  ws.on("message", (message) => {
-    console.log("📩 Received message:", message);
-  });
-// Clear interval on close
-ws.on('close', () => {
-    clearInterval(pingInterval);
-    console.log("❌ WebSocket Client Disconnected");
+  // Handle incoming messages - now supporting charging data from server 4000
+  ws.on("message", async (message) => {
+    try {
+      console.log("📩 Raw message received:", message.toString());
+      const data = JSON.parse(message);
+      
+      // Log the full incoming data for debugging
+      console.log("📊 Parsed WebSocket data:", JSON.stringify(data, null, 2));
+      
+      // Check if this is charging data from server 4000
+      if (data.type === "charging_update") {
+        console.log(`⚡ Charging data received - SoC: ${data.batteryPercentage}%, Temp: ${data.batteryTemperature}°C`);
+        
+        // Stop discharge simulation if it's running
+        if (dischargeInterval) {
+          clearInterval(dischargeInterval);
+          console.log("🛑 Discharge simulation stopped - charging in progress");
+        }
+        
+        // Update car data in MongoDB with only SoC and temperature
+        const car = await Car.findOne();
+        if (car) {
+          const updatedCar = await Car.findByIdAndUpdate(
+            car._id,
+            { 
+              stateOfCharge: data.batteryPercentage,
+              batteryTemperature: data.batteryTemperature
+            },
+            { new: true }
+          );
+          
+          
+          if (updatedCar) {
+            broadcastToClients(JSON.stringify(updatedCar));
+          }
+        }
+      }
+      // Initialize charging 
+      else if (data.type === "charging_init") {
+        console.log(`🚀 Charging initialized with starting SoC: ${data.startingSoc}%`);
+        
+        // Stop discharge simulation if it's running
+        if (dischargeInterval) {
+          clearInterval(dischargeInterval);
+          console.log("🛑 Discharge simulation stopped - charging starting");
+        }
+      }
+      // Handle charging complete message
+      else if (data.type === "charging_complete") {
+        console.log(`✅ Charging completed with final SoC: ${data.finalBatteryPercentage}%`);
+        
+        
+      }
+     
+      else if (!data.type || data.type === "heartbeat") {
+        // Standard messages, just log them
+        console.log("💬 Standard message or heartbeat received");
+      }
+    } catch (error) {
+      console.error("❌ Error processing message:", error);
+    }
   });
 });
